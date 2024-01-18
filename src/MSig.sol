@@ -84,35 +84,49 @@ contract MSig is Ownable {
 
 
     //Modifiers
+    
+    /// @notice Ensures the function is called by a wallet owner
     modifier onlyWalletOwner() {
         if(!isOwner[msg.sender]) revert MSig__OnlyWalletOwnersCanAccess();
         _;
     }
+    
+    /// @notice Ensures the specified owner does not already exist in the wallet
+    /// @param owner The address to check
     modifier ownerShouldntExist(address owner) {
         if(isOwner[owner]) revert MSig__OwnerAlreadyExists();
         _;
     }
-
+    
+    /// @notice Ensures the specified owner exists in the wallet
+    /// @param owner The address to check
     modifier ownerExists(address owner) {
         if(!isOwner[owner]) revert MSig__OwnerDoesntExist();
         _;
     }
-
+    
+    /// @notice Ensures the transaction at the specified index exists
+    /// @param _txIndex The index of the transaction to check
     modifier txExists(uint _txIndex) {
-        if(_txIndex > transactions.length) revert MSig__InvalidTransaction();
+        if(_txIndex >= transactions.length) revert MSig__InvalidTransaction();
         _;
     }
-
+    
+    /// @notice Ensures the transaction at the specified index has not been approved by the sender
+    /// @param _txIndex The index of the transaction to check
     modifier notApproved(uint _txIndex) {
         if(approved[_txIndex][msg.sender]) revert MSig__TransactionAlreadyApproved();
         _;
     }
-
+    
+    /// @notice Ensures the transaction at the specified index has not been executed
+    /// @param _txIndex The index of the transaction to check
     modifier notExecuted(uint _txIndex) {
         if(transactions[_txIndex].executed) revert MSig__TransactionAlreadyExecuted();
         _;
     }
     
+        
     // Constructor to initialize the Multi-Signature Wallet.
     // Design Choice: The constructor sets up initial owners and the required number of approvals.
     // This setup is immutable, enhancing security by preventing post-deployment changes.
@@ -200,7 +214,7 @@ contract MSig is Ownable {
     }
 
      */
-    
+
     /// @notice Submits a new transaction to the multi-signature wallet
     /// @dev Can only be called by a wallet owner; transaction is not executed until approved
     /// @param _destination The address to which the transaction will be sent
