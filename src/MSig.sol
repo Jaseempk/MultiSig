@@ -40,8 +40,12 @@ error MSig__InvalidTransaction();
 error MSig__TransactionAlreadyApproved();
 error MSig__TransactionAlreadyExecuted();
 error MSig__TransactionNotApproved();
+error MSig__InsufficientNumApprovals();
 
-
+// MSig is a Multi-Signature Wallet Contract.
+// It allows a group of owners to collectively approve transactions before execution.
+// Design Choice: The contract leverages the OpenZeppelin ECDSA library for signature verification.
+// This provides security and reliability, as the library is well-tested and standard in the Ethereum community.
 contract MSig is Ownable {
     using ECDSA for bytes32;
 
@@ -49,12 +53,16 @@ contract MSig is Ownable {
     mapping(uint => mapping(address => bool)) public approved;
     mapping(uint256 => Transaction) public transactionss;
 
+    //state variables
     uint public immutable i_required;
 
 
     Transaction[] public transactions;
     address[] public owners;
 
+    // Transaction struct: Holds the details of each transaction.
+    // Design Choice: A struct is used to group transaction-related data,
+    // improving data management and readability.
     struct Transaction {
         address destination;
         uint value;
@@ -104,7 +112,10 @@ contract MSig is Ownable {
         if(transactions[_txIndex].executed) revert MSig__TransactionAlreadyExecuted();
         _;
     }
-
+    
+    // Constructor to initialize the Multi-Signature Wallet.
+    // Design Choice: The constructor sets up initial owners and the required number of approvals.
+    // This setup is immutable, enhancing security by preventing post-deployment changes.
     constructor(address[] memory _owners, uint _required)Ownable(msg.sender) {
         require(_owners.length > 0, "Owners required");
         require(_required > 0 && _required <= _owners.length, "Invalid number of required approvals");
@@ -122,7 +133,10 @@ contract MSig is Ownable {
         i_required = _required;
     }
 
-
+    /// @notice Adds a new owner to the multi-signature wallet
+    /// @dev Only the contract owner can add new owners and the new owner must not already be an owner
+    /// @param owner The address of the new owner to be added
+    /// @custom:modifiers onlyOwner, ownerShouldntExist
     function addOwner(address owner)
         public
         onlyOwner
@@ -133,6 +147,10 @@ contract MSig is Ownable {
         emit OwnerAddition(owner);
     }
 
+    /// @notice Removes an existing owner from the multi-signature wallet
+    /// @dev Only the contract owner can remove owners and the owner to be removed must exist
+    /// @param owner The address of the owner to be removed
+    /// @custom:modifiers onlyOwner, ownerExists
     function removeOwner(address owner)
         public
         onlyOwner
@@ -148,6 +166,11 @@ contract MSig is Ownable {
         emit OwnerRemoval(owner);
     }
 
+    /// @notice Replaces an existing owner with a new owner
+    /// @dev Only the contract owner can replace owners, the old owner must exist and the new owner must not already be an owner
+    /// @param oldOwner The address of the owner to be replaced
+    /// @param newOwner The address of the new owner to replace the old one
+    /// @custom:modifiers onlyOwner, ownerExists, ownerShouldntExist
     function replaceOwner(address oldOwner, address newOwner)
         public
         onlyOwner
@@ -177,10 +200,12 @@ contract MSig is Ownable {
     }
 
      */
-    receive() external payable {
-        emit Deposit(msg.sender, msg.value);
-    }
-
+    
+    /// @notice Submits a new transaction to the multi-signature wallet
+    /// @dev Can only be called by a wallet owner; transaction is not executed until approved
+    /// @param _destination The address to which the transaction will be sent
+    /// @param _value The amount of Ether (in wei) to be sent
+    /// @param _data The data payload of the transaction
     function submitTransaction(address _destination, uint _value, bytes memory _data)
         public
         onlyWalletOwner
@@ -198,6 +223,9 @@ contract MSig is Ownable {
         emit TransactionSubmitted(txIndex,_destination,_value,_data,false,0);
     }
 
+    /// @notice Approves a transaction proposed in the multi-signature wallet
+    /// @dev Can only be called by a wallet owner; a transaction must exist and not already be executed or approved by the caller
+    /// @param _txIndex The index of the transaction in the transactions array to approve
     function approveTransaction(uint _txIndex)
         public
         onlyWalletOwner
@@ -212,6 +240,28 @@ contract MSig is Ownable {
         emit TransactionApproval(msg.sender, _txIndex);
     }
 
+    /// @notice Revokes approval for a transaction proposed in the multi-signature wallet
+    /// @dev Can only be called by a wallet owner; a transaction must exist, not be executed, and be previously approved by the caller
+    /// @param _txIndex The index of the transaction in the transactions array to revoke approval
+    function revokeApproval(uint _txIndex)
+        public
+        onlyWalletOwner
+        txExists(_txIndex)
+        notExecuted(_txIndex)
+    {
+        if(!approved[_txIndex][msg.sender]) revert MSig__TransactionNotApproved();
+        Transaction storage transaction = transactions[_txIndex];
+        approved[_txIndex][msg.sender] = false;
+        transaction.approvalsCount -= 1;
+
+        emit Revocation(msg.sender, _txIndex);
+    }
+
+    /// @notice Executes a transaction if it has the required number of approvals
+    /// @param _txIndex The index of the transaction in the transactions array
+    /// @param signatures An array of signatures from the owners
+    /// @dev Design Choice: Requires signatures to be verified before executing the transaction.
+    /// This adds an extra layer of security by ensuring that only transactions approved by owners are executed.
     function executeTransaction(uint _txIndex,bytes[] memory signatures)
         public
         onlyWalletOwner
@@ -219,7 +269,7 @@ contract MSig is Ownable {
         notExecuted(_txIndex)
     {
         Transaction storage transaction = transactions[_txIndex];
-        require(transaction.approvalsCount >= i_required, "Insufficient approvals");
+        if(transaction.approvalsCount < i_required)revert MSig__InsufficientNumApprovals();
         if(signatures.length< i_required) revert MSig__InsufficientSignatureCount();
 
         bytes32 txHash=getTransactionHash(_txIndex);
@@ -247,26 +297,24 @@ contract MSig is Ownable {
         emit TransactionExecuted(_txIndex,transaction.value,transaction.data);
     }
 
-    function revokeApproval(uint _txIndex)
-        public
-        onlyWalletOwner
-        txExists(_txIndex)
-        notExecuted(_txIndex)
-    {
-        if(!approved[_txIndex][msg.sender]) revert MSig__TransactionNotApproved();
-        Transaction storage transaction = transactions[_txIndex];
-        approved[_txIndex][msg.sender] = false;
-        transaction.approvalsCount -= 1;
 
-        emit Revocation(msg.sender, _txIndex);
-    }
 
     //View functions
+
+    /// @notice Creates a hash of the transaction details
+    /// @dev This function generates a hash used for off-chain signing and on-chain verification
+    /// @param _txIndex The index of the transaction in the transactions array
+    /// @return The keccak256 hash of the transaction details
+    /// @dev Design Choice: The hash includes the contract address, txIndex ,transaction data,transaction value, and destination.
+    /// This ensures uniqueness and prevents replay attacks across different contracts or transactions.
     function getTransactionHash(uint _txIndex)public view returns(bytes32){
         Transaction storage transaction=transactions[_txIndex];
-        bytes32 txHash=keccak256(abi.encodePacked(address(this),transaction.data,transaction.destination));
+        bytes32 txHash=keccak256(abi.encodePacked(address(this),_txIndex,transaction.value,transaction.data,transaction.destination));
         return txHash;
     }
 
+    receive() external payable {
+        emit Deposit(msg.sender, msg.value);
+    }
 
 }
