@@ -84,49 +84,49 @@ contract MSig is Ownable {
 
 
     //Modifiers
-    
+
     /// @notice Ensures the function is called by a wallet owner
     modifier onlyWalletOwner() {
         if(!isOwner[msg.sender]) revert MSig__OnlyWalletOwnersCanAccess();
         _;
     }
-    
+
     /// @notice Ensures the specified owner does not already exist in the wallet
     /// @param owner The address to check
     modifier ownerShouldntExist(address owner) {
         if(isOwner[owner]) revert MSig__OwnerAlreadyExists();
         _;
     }
-    
+
     /// @notice Ensures the specified owner exists in the wallet
     /// @param owner The address to check
     modifier ownerExists(address owner) {
         if(!isOwner[owner]) revert MSig__OwnerDoesntExist();
         _;
     }
-    
+
     /// @notice Ensures the transaction at the specified index exists
     /// @param _txIndex The index of the transaction to check
     modifier txExists(uint _txIndex) {
         if(_txIndex >= transactions.length) revert MSig__InvalidTransaction();
         _;
     }
-    
+
     /// @notice Ensures the transaction at the specified index has not been approved by the sender
     /// @param _txIndex The index of the transaction to check
     modifier notApproved(uint _txIndex) {
         if(approved[_txIndex][msg.sender]) revert MSig__TransactionAlreadyApproved();
         _;
     }
-    
+
     /// @notice Ensures the transaction at the specified index has not been executed
     /// @param _txIndex The index of the transaction to check
     modifier notExecuted(uint _txIndex) {
         if(transactions[_txIndex].executed) revert MSig__TransactionAlreadyExecuted();
         _;
     }
-    
-        
+
+
     // Constructor to initialize the Multi-Signature Wallet.
     // Design Choice: The constructor sets up initial owners and the required number of approvals.
     // This setup is immutable, enhancing security by preventing post-deployment changes.
@@ -294,10 +294,9 @@ contract MSig is Ownable {
         for(uint i=0;i<signatures.length;i++){
             address recovered=txHash.recover(signatures[i]);
             if(recovered==lastSigner) revert MSig__SigManipulationDetected();
-            recovered=lastSigner;
+            lastSigner=recovered;
 
-            if(isOwner[recovered] && !approved[_txIndex][recovered]){
-                approved[_txIndex][recovered]=true;
+            if(isOwner[recovered] && approved[_txIndex][recovered]){
                 validSignatures+=1;
             }
         }
